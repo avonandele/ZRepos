@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thermodynamics Property Lookup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+</head>
+<body class="bg-gradient-to-br from-slate-100 to-slate-200 min-h-screen">
+    <div id="app" class="p-4">
+        <div class="max-w-2xl mx-auto">
+            <!-- Header -->
+            <div class="bg-white rounded-xl shadow-xl p-6 mb-4">
+                <h1 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
+                    Thermo Property Lookup
+                </h1>
+                <p class="text-gray-600 mt-2">Fast interpolation for thermodynamic properties</p>
+            </div>
+
+            <!-- Main Content -->
+            <div id="content" class="bg-white rounded-xl shadow-xl p-6">
+                <!-- Content will be rendered here by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ========================================================================
+        // STATE MANAGEMENT
+        // ========================================================================
+        const state = {
+            screen: 'upload',
+            materialData: {},
+            selectedMaterial: null,
+            selectedTable: null,
+            xProperty: '',
+            xValue: '',
+            yProperty: '',
+            results: null,
+            uploadStatus: '',
+            unitSystem: 'metric'
+        };
+
+        // ========================================================================
+        // UNIT CONVERSION FUNCTIONS
+        // ========================================================================
+        const conversions = {
+            temperature: {
+                toEnglish: (c) => (c * 9/5) + 32,
+                toMetric: (f) => (f - 32) * 5/9,
+                metricUnit: '°C',
+                englishUnit: '°F'
+            },
+            pressure: {
+                toEnglish: (mpa) => mpa * 145.038,
+                toMetric: (psi) => psi / 145.038,
+                metricUnit: 'MPa',
+                englishUnit: 'psi'
+            },
+            v: {
+                toEnglish: (m3kg) => m3kg * 16.0185,
+                toMetric: (ft3lb) => ft3lb / 16.0185,
+                metricUnit: 'm³/kg',
+                englishUnit: 'ft³/lb'
+            },
+            u: {
+                toEnglish: (kjkg) => kjkg * 0.429923,
+                toMetric: (btulb) => btulb / 0.429923,
+                metricUnit: 'kJ/kg',
+                englishUnit: 'BTU/lb'
+            },
+            h: {
+                toEnglish: (kjkg) => kjkg * 0.429923,
+                toMetric: (btulb) => btulb / 0.429923,
+                metricUnit: 'kJ/kg',
+                englishUnit: 'BTU/lb'
+            },
+            s: {
+                toEnglish: (kjkgk) => kjkgk * 0.238846,
+                toMetric: (btulbr) => btulbr / 0.238846,
+                metricUnit: 'kJ/(kg·K)',
+                englishUnit: 'BTU/(lb·°R)'
+            }
+        };
+
+        function getConversionType(propName) {
+            const normalized = propName.toLowerCase();
+            if (normalized.includes('temp')) return 'temperature';
+            if (normalized.includes('pressure') || normalized.startsWith('p')) return 'pressure';
+            if (normalized.startsWith('v')) return 'v';
+            if (normalized.startsWith('u')) return 'u';
+            if (normalized.startsWith('h')) return 'h';
+            if (normalized.startsWith('s')) return 's';
+            return null;
+        }
+
+        function convertValue(value, propName, toEnglish = true) {
+            const conversionType = getConversionType(propName);
+            if (!conversionType || !conversions[conversionType]) return value;
+
+            if (toEnglish) {
+                return conversions[conversionType].toEnglish(value);
+            } else {
+                return conversions[conversionType].toMetric(value);
+            }
+        }
+
+        function getUnitLabel(propName) {
+            const conversionType = getConversionType(propName);
+            if (!conversionType || !conversions[conversionType]) return '';
+
+            return state.unitSystem === 'metric'
+                ? conversions[conversionType].metricUnit
+                : conversions[conversionType].englishUnit;
+        }
+
+        // ========================================================================
+        // FILE UPLOAD HANDLER
+        // ========================================================================
+        async function handleFileUpload(files) {
+            state.uploadStatus = 'Processing files...';
+            render();
+
+            const data = {};
+            let processedCount = 0;
+
+            for (const file of files) {
+                if (!file.name.endsWith('.csv')) continue;
+
+                const pathParts = file.webkitRelativePath ? file.webkitRelativePath.split('/') : [file.name];
+
+                let material = 'Unknown Material';
+                let tableName = file.name;
+
+                if (pathParts.length >= 3) {
+                    material = pathParts[1];
+                    tableName = pathParts[2];
+                } else if (pathParts.length === 2) {
+                    material = pathParts[0];
+                    tableName = pathParts[1];
+                }
+
+                const text = await file.text();
+                const parsed = Papa.parse(text, {
+                    header: true,
+                    dynamicTyping: true,
+                    skipEmptyLines: true
+                });
+
+                if (parsed.data.length > 0) {
+                    if (!data[material]) {
+                        data[material] = {};
+                    }
+
+                    data[material][tableName] = {
+                        columns: parsed.meta.fields,
+                        data: parsed.data.map(row => parsed.meta.fields.map(col => row[col]))
+                    };
+
+                    processedCount++;
+                }
+            }
+
+            if (processedCount > 0) {
+                state.materialData = data;
+                state.uploadStatus = `✅ Loaded ${processedCount} tables from ${Object.keys(data).length} material(s)`;
+                render();
+                setTimeout(() => {
+                    state.screen = 'material';
+                    render();
+                }, 1500);
+            } else {
+                state.uploadStatus = '❌ No valid CSV files found. Please upload CSV files.';
+                render();
+            }
+        }
+
+        // ========================================================================
+        // INTERPOLATION FUNCTION
+        // ========================================================================
+        function interpolate(tableData, xProp, xVal, yProp) {
+            const { columns, data } = tableData;
+
+            let xValMetric = xVal;
+            if (state.unitSystem === 'english') {
+                xValMetric = convertValue(xVal, xProp, false);
+            }
+
+            const normalize = (str) => str.toLowerCase().replace(/[\s\(\)·]/g, '');
+            const normalizedCols = columns.map(normalize);
+            const xPropNorm = normalize(xProp);
+            const yPropNorm = normalize(yProp);
+
+            const xIdx = normalizedCols.indexOf(xPropNorm);
+
+            if (xIdx === -1) {
+                throw new Error(`Property not found: ${xProp}`);
+            }
+
+            const xData = data.map(row => row[xIdx]);
+
+            const minX = Math.min(...xData);
+            const maxX = Math.max(...xData);
+            const extrapolating = xValMetric < minX || xValMetric > maxX;
+
+            let i1 = 0, i2 = 1;
+            for (let i = 0; i < xData.length - 1; i++) {
+                if (xValMetric >= xData[i] && xValMetric <= xData[i + 1]) {
+                    i1 = i;
+                    i2 = i + 1;
+                    break;
+                }
+            }
+
+            const x1 = xData[i1], x2 = xData[i2];
+
+            const matchingCols = [];
+            columns.forEach((col, colIdx) => {
+                const colNorm = normalize(col);
+                if (colNorm.startsWith(yPropNorm) && colIdx !== xIdx) {
+                    matchingCols.push({ original: col, index: colIdx });
+                }
+            });
+
+            if (matchingCols.length === 0) {
+                throw new Error(`No properties found matching: ${yProp}`);
+            }
+
+            const results = {};
+            matchingCols.forEach(({ original, index }) => {
+                const y1 = data[i1][index];
+                const y2 = data[i2][index];
+                const interpolatedValue = y1 + (y2 - y1) * (xValMetric - x1) / (x2 - x1);
+
+                const finalValue = state.unitSystem === 'english'
+                    ? convertValue(interpolatedValue, original, true)
+                    : interpolatedValue;
+
+                results[original] = finalValue;
+            });
+
+            return {
+                allValues: results,
+                extrapolating,
+                range: {
+                    min: state.unitSystem === 'english' ? convertValue(minX, xProp, true) : minX,
+                    max: state.unitSystem === 'english' ? convertValue(maxX, xProp, true) : maxX
+                }
+            };
+        }
+
+        // ========================================================================
+        // EVENT HANDLERS
+        // ========================================================================
+        function handleCalculate() {
+            try {
+                const tableData = state.materialData[state.selectedMaterial][state.selectedTable];
+                const result = interpolate(tableData, state.xProperty, parseFloat(state.xValue), state.yProperty);
+                state.results = result;
+                state.screen = 'results';
+                render();
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+        function resetApp() {
+            state.screen = 'material';
+            state.selectedMaterial = null;
+            state.selectedTable = null;
+            state.xProperty = '';
+            state.xValue = '';
+            state.yProperty = '';
+            state.results = null;
+            render();
+        }
+
+        function loadDemoData() {
+            state.materialData = {
+                'Water': {
+                    'saturated_water_T.csv': {
+                        columns: ['temperature°c', 'pressurempa', 'vfm3/kg', 'vgm3/kg', 'ufkj/kg', 'ugkj/kg', 'hfkj/kg', 'hgkj/kg', 'sfkj/kg·k', 'sgkj/kg·k'],
+                        data: [
+                            [0.01, 0.0006117, 0.001000, 206.00, 0.00, 2374.9, 0.01, 2500.9, 0.0000, 9.1555],
+                            [20, 0.0023392, 0.001002, 57.762, 83.91, 2402.3, 83.91, 2537.4, 0.2965, 8.6661],
+                            [40, 0.0073849, 0.001008, 19.515, 167.53, 2429.0, 167.53, 2573.5, 0.5724, 8.2558],
+                            [60, 0.019946, 0.001017, 7.6670, 251.16, 2455.5, 251.18, 2608.8, 0.8313, 7.9085],
+                            [80, 0.047414, 0.001029, 3.4053, 334.97, 2481.2, 335.02, 2643.0, 1.0756, 7.6111],
+                            [100, 0.10142, 0.001044, 1.6720, 419.06, 2506.0, 419.17, 2675.6, 1.3072, 7.3541],
+                        ]
+                    }
+                }
+            };
+            state.screen = 'material';
+            render();
+        }
+
+        // ========================================================================
+        // RENDERING FUNCTIONS
+        // ========================================================================
+        function formatPropertyName(prop) {
+            const match = prop.match(/^([a-z]+)(.*?)$/i);
+            if (!match) return prop;
+
+            const baseName = match[1];
+
+            const nameMap = {
+                'temperature': 'Temperature',
+                'pressure': 'Pressure',
+                'vf': 'v_f', 'vg': 'v_g', 'vfg': 'v_fg',
+                'uf': 'u_f', 'ug': 'u_g', 'ufg': 'u_fg',
+                'hf': 'h_f', 'hg': 'h_g', 'hfg': 'h_fg',
+                'sf': 's_f', 'sg': 's_g', 'sfg': 's_fg',
+                'v': 'v', 'u': 'u', 'h': 'h', 's': 's'
+            };
+
+            const displayName = nameMap[baseName.toLowerCase()] || baseName;
+            const unit = getUnitLabel(prop);
+
+            if (unit) {
+                return `${displayName} (${unit})`;
+            }
+            return displayName;
+        }
+
+        function renderUploadScreen() {
+            return `
+                <div class="space-y-6">
+                    <div class="text-center">
+                        <svg class="mx-auto mb-4 text-blue-500" width="64" height="64" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                        </svg>
+                        <h2 class="text-2xl font-bold text-gray-800 mb-2">Upload Property Tables</h2>
+                        <p class="text-gray-600">Upload your CSV files or drag and drop your entire Tables folder</p>
+                    </div>
+
+                    <input type="file" id="folderInput" multiple webkitdirectory directory accept=".csv" class="hidden">
+                    <input type="file" id="filesInput" multiple accept=".csv" class="hidden">
+
+                    <div class="grid grid-cols-1 gap-4">
+                        <label for="folderInput" class="p-8 border-4 border-dashed border-blue-300 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors cursor-pointer text-center">
+                            <svg class="mx-auto mb-3 text-blue-400" width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <div class="font-semibold text-gray-700 mb-1">Upload Folder</div>
+                            <div class="text-sm text-gray-500">Click to select your Tables folder with all materials</div>
+                        </label>
+
+                        <label for="filesInput" class="p-8 border-4 border-dashed border-green-300 rounded-lg hover:border-green-500 hover:bg-green-50 transition-colors cursor-pointer text-center">
+                            <svg class="mx-auto mb-3 text-green-400" width="48" height="48" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <div class="font-semibold text-gray-700 mb-1">Upload Individual Files</div>
+                            <div class="text-sm text-gray-500">Select multiple CSV files (Ctrl/Cmd + Click)</div>
+                        </label>
+                    </div>
+
+                    ${state.uploadStatus ? `
+                        <div class="p-4 rounded-lg text-center font-semibold ${
+                            state.uploadStatus.startsWith('✅') ? 'bg-green-100 text-green-800' :
+                            state.uploadStatus.startsWith('❌') ? 'bg-red-100 text-red-800' :
+                            'bg-blue-100 text-blue-800'
+                        }">
+                            ${state.uploadStatus}
+                        </div>
+                    ` : ''}
+
+                    ${Object.keys(state.materialData).length === 0 ? `
+                        <div class="text-center pt-4">
+                            <button onclick="loadDemoData()" class="text-sm text-blue-600 hover:text-blue-700 underline">
+                                Try Demo Mode (Sample Water Data)
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }
+
+        function renderMaterialScreen() {
+            const materials = Object.keys(state.materialData);
+            return `
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-2xl font-bold text-gray-800">Select Material</h2>
+                        <button onclick="state.screen='upload'; render();" class="text-sm text-blue-600 hover:text-blue-700 underline">
+                            Upload Different Files
+                        </button>
+                    </div>
+
+                    <div class="bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between">
+                            <span class="font-semibold text-gray-700">Unit System:</span>
+                            <div class="flex gap-2">
+                                <button onclick="state.unitSystem='metric'; render();" class="px-4 py-2 rounded-lg font-semibold transition-all ${
+                                    state.unitSystem === 'metric'
+                                        ? 'bg-blue-600 text-white shadow-lg'
+                                        : 'bg-white text-gray-600 hover:bg-gray-100'
+                                }">
+                                    Metric (SI)
+                                </button>
+                                <button onclick="state.unitSystem='english'; render();" class="px-4 py-2 rounded-lg font-semibold transition-all ${
+                                    state.unitSystem === 'english'
+                                        ? 'bg-blue-600 text-white shadow-lg'
+                                        : 'bg-white text-gray-600 hover:bg-gray-100'
+                                }">
+                                    English (IP)
+                                </button>
+                            </div>
+                        </div>
+                        <div class="text-xs text-gray-600 mt-2">
+                            ${state.unitSystem === 'metric'
+                                ? '°C, MPa, m³/kg, kJ/kg, kJ/(kg·K)'
+                                : '°F, psi, ft³/lb, BTU/lb, BTU/(lb·°R)'}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 gap-3">
+                        ${materials.map((material, idx) => `
+                            <button onclick="state.selectedMaterial='${material}'; state.screen='table'; render();" class="p-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-left transition-colors flex items-center justify-between">
+                                <span class="font-semibold">${idx + 1}. ${material}</span>
+                                <span class="text-sm opacity-75">${Object.keys(state.materialData[material]).length} tables</span>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderTableScreen() {
+            const tables = Object.keys(state.materialData[state.selectedMaterial]);
+            return `
+                <div class="space-y-4">
+                    <button onclick="state.screen='material'; render();" class="flex items-center text-blue-600 hover:text-blue-700">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                        <span>Back to Materials</span>
+                    </button>
+
+                    <h2 class="text-2xl font-bold text-gray-800">Select Table - ${state.selectedMaterial}</h2>
+
+                    <div class="grid grid-cols-1 gap-3">
+                        ${tables.map((table, idx) => `
+                            <button onclick="state.selectedTable='${table}'; state.screen='properties'; render();" class="p-4 bg-green-500 hover:bg-green-600 text-white rounded-lg text-left transition-colors">
+                                <div class="font-semibold">${idx + 1}. ${table}</div>
+                                <div class="text-sm opacity-75 mt-1">
+                                    ${state.materialData[state.selectedMaterial][table].columns.length} properties available
+                                </div>
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderPropertyScreen() {
+            const tableData = state.materialData[state.selectedMaterial][state.selectedTable];
+            const availableProps = tableData.columns;
+            const baseProperties = ['v', 'u', 'h', 's', 'T', 'P', 'temperature', 'pressure'];
+
+            return `
+                <div class="space-y-4">
+                    <button onclick="state.screen='table'; render();" class="flex items-center text-blue-600 hover:text-blue-700">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                        <span>Back to Tables</span>
+                    </button>
+
+                    <div class="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
+                        <span class="text-sm text-blue-800 font-semibold">
+                            Units: ${state.unitSystem === 'metric' ? 'Metric (SI)' : 'English (IP)'}
+                        </span>
+                        <button onclick="state.screen='material'; render();" class="text-xs text-blue-600 hover:text-blue-700 underline">
+                            Change Units
+                        </button>
+                    </div>
+
+                    <h2 class="text-2xl font-bold text-gray-800">Property Lookup</h2>
+                    <div class="text-sm text-gray-600">${state.selectedMaterial} → ${state.selectedTable}</div>
+
+                    <div class="bg-white p-6 rounded-lg border-2 border-gray-200 space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Known Property (X):</label>
+                            <select id="xProperty" onchange="state.xProperty=this.value; render();" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
+                                <option value="">-- Select Property --</option>
+                                ${availableProps.map(prop => `
+                                    <option value="${prop}" ${state.xProperty === prop ? 'selected' : ''}>
+                                        ${prop} → ${getUnitLabel(prop)}
+                                    </option>
+                                `).join('')}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                Value of ${state.xProperty || 'X'} ${state.xProperty ? `(${getUnitLabel(state.xProperty)})` : ''}:
+                            </label>
+                            <input type="number" step="any" id="xValue" value="${state.xValue}"
+                                   oninput="state.xValue=this.value"
+                                   placeholder="Enter value in ${getUnitLabel(state.xProperty) || 'selected units'}"
+                                   class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">Find Property (Y):</label>
+                            <select id="yProperty" onchange="state.yProperty=this.value; render();" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
+                                <option value="">-- Select Property --</option>
+                                ${baseProperties.map(prop => `
+                                    <option value="${prop}" ${state.yProperty === prop ? 'selected' : ''}>${prop}</option>
+                                `).join('')}
+                            </select>
+                            <div class="text-xs text-gray-500 mt-1">
+                                Will return all related values (e.g., "v" returns v_f, v_g, v_fg if available)
+                            </div>
+                        </div>
+
+                        <button onclick="handleCalculate()"
+                                ${!state.xProperty || !state.xValue || !state.yProperty ? 'disabled' : ''}
+                                class="w-full p-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-colors">
+                            Calculate
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderResultsScreen() {
+            return `
+                <div class="space-y-4">
+                    <button onclick="state.screen='properties'; render();" class="flex items-center text-blue-600 hover:text-blue-700">
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                        <span>Back to Input</span>
+                    </button>
+
+                    <h2 class="text-2xl font-bold text-gray-800">Results</h2>
+
+                    <div class="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg px-4 py-2 flex items-center justify-between">
+                        <span class="text-sm text-blue-800 font-semibold">
+                            Displaying in: ${state.unitSystem === 'metric' ? 'Metric (SI)' : 'English (IP)'}
+                        </span>
+                        <button onclick="state.screen='material'; render();" class="text-xs text-blue-600 hover:text-blue-700 underline">
+                            Change Units
+                        </button>
+                    </div>
+
+                    ${state.results.extrapolating ? `
+                        <div class="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-4 flex items-start gap-3">
+                            <svg class="text-yellow-600 flex-shrink-0 mt-1" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            <div>
+                                <div class="font-semibold text-yellow-800">Extrapolation Warning</div>
+                                <div class="text-sm text-yellow-700 mt-1">
+                                    Input value (${state.xValue}) is outside table range [${state.results.range.min.toFixed(4)} - ${state.results.range.max.toFixed(4)}]
+                                </div>
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+                        <div class="text-sm text-blue-700 font-semibold mb-1">Given:</div>
+                        <div class="text-lg text-blue-900">
+                            ${formatPropertyName(state.xProperty)} = ${state.xValue}
+                        </div>
+                        <div class="text-sm text-blue-700 mt-2">Looking for: ${state.yProperty}</div>
+                    </div>
+
+                    <div class="bg-white border-2 border-gray-200 rounded-lg divide-y divide-gray-200">
+                        <div class="px-4 py-3 bg-gray-50 font-semibold text-gray-700">
+                            ${state.yProperty.toUpperCase()} Properties
+                        </div>
+                        ${Object.entries(state.results.allValues).map(([prop, value]) => `
+                            <div class="px-4 py-3 flex justify-between items-center hover:bg-gray-50 transition-colors">
+                                <span class="text-gray-700 font-medium">${formatPropertyName(prop)}</span>
+                                <span class="font-mono text-lg font-semibold text-gray-900">${value.toFixed(5)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <button onclick="resetApp()" class="w-full p-4 bg-gray-600 hover:bg-gray-700 text-white font-semibold rounded-lg transition-colors">
+                        New Lookup
+                    </button>
+                </div>
+            `;
+        }
+
+        function render() {
+            const content = document.getElementById('content');
+            let html = '';
+
+            switch(state.screen) {
+                case 'upload':
+                    html = renderUploadScreen();
+                    break;
+                case 'material':
+                    html = renderMaterialScreen();
+                    break;
+                case 'table':
+                    html = renderTableScreen();
+                    break;
+                case 'properties':
+                    html = renderPropertyScreen();
+                    break;
+                case 'results':
+                    html = renderResultsScreen();
+                    break;
+            }
+
+            content.innerHTML = html;
+
+            // Attach file upload listeners after render
+            if (state.screen === 'upload') {
+                const folderInput = document.getElementById('folderInput');
+                const filesInput = document.getElementById('filesInput');
+
+                if (folderInput) {
+                    folderInput.addEventListener('change', (e) => {
+                        handleFileUpload(Array.from(e.target.files));
+                    });
+                }
+
+                if (filesInput) {
+                    filesInput.addEventListener('change', (e) => {
+                        handleFileUpload(Array.from(e.target.files));
+                    });
+                }
+            }
+        }
+
+        // Initial render
+        render();
+    </script>
+</body>
+</html>
