@@ -19285,6 +19285,14 @@ const EMBEDDED_DATA = {
 
         function renderTableScreen() {
             const tables = Object.keys(state.materialData[state.selectedMaterial]);
+
+            // Sort tables by numerical order (A-4, A-5, A-6, A-11, A-12, etc.)
+            tables.sort((a, b) => {
+                const numA = parseInt(a.match(/A-(\d+)/)?.[1] || '0');
+                const numB = parseInt(b.match(/A-(\d+)/)?.[1] || '0');
+                return numA - numB;
+            });
+
             return `
                 <div class="space-y-4">
                     <button onclick="state.screen='material'; render();" class="flex items-center text-blue-600 hover:text-blue-700">
