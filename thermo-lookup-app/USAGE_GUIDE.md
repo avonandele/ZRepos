@@ -12,8 +12,8 @@ You now have **18 thermodynamic property tables** loaded:
 - A-8 Saturated Ice-Water Vapor - 23 rows
 
 ### R-134a (3 tables)
-- A-11 P Saturated R-134a - Empty (needs data)
-- A-12 T Saturated R-134a - 57 rows
+- A-11 T Saturated R-134a - 57 rows (temperature-based)
+- A-12 P Saturated R-134a - 35 rows (pressure-based)
 - A-13 Superheated R-134a - 262 rows
 
 ### Ideal Gases (10 tables)
@@ -118,10 +118,26 @@ The app automatically converts your input and output!
 3. **Interpolation:** The app uses linear interpolation between table values
 4. **Multiple Lookups:** Click "New Lookup" to start over or "Back to Input" to change values
 
-## Troubleshooting
+## Example Lookup - R-134a Refrigerant
 
-**Empty R-134a P file?**
-- The A-11 file is empty. Add data if needed, or use A-12 (T-based) instead
+Finding R-134a properties at -30°C:
+
+1. **Select Material:** R-134a
+2. **Select Table:** A-11 T Saturated R-134a.csv
+3. **Known Property (X):** T (°C)
+4. **Value:** -30
+5. **Find Property (Y):** Enthalpy (h)
+6. **Click Calculate**
+
+Result: Interpolated hf, hfg, hg values at -30°C
+
+Or if you know pressure instead:
+1. **Select Table:** A-12 P Saturated R-134a.csv
+2. **Known Property (X):** P (kPa)
+3. **Value:** 100
+4. **Find Property (Y):** Temperature (T) or any other property
+
+## Troubleshooting
 
 **Property not found?**
 - Make sure you select a property that exists in your chosen table
