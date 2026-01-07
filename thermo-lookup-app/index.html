@@ -18727,6 +18727,8 @@ const EMBEDDED_DATA = {
             selectedTable: null,
             xProperty: '',
             xValue: '',
+            x2Property: '',  // Second known property for superheated tables
+            x2Value: '',     // Second value for superheated tables
             yProperty: '',
             results: null,
             uploadStatus: '',
@@ -18868,8 +18870,133 @@ const EMBEDDED_DATA = {
         }
 
         // ========================================================================
-        // INTERPOLATION FUNCTION
+        // INTERPOLATION FUNCTIONS
         // ========================================================================
+        function isSuperheatedTable(tableName) {
+            return tableName.toLowerCase().includes('superheated');
+        }
+
+        // 2D interpolation for superheated tables (requires P and T)
+        function interpolate2D(tableData, x1Prop, x1Val, x2Prop, x2Val, yProp) {
+            const { columns, data } = tableData;
+
+            // Convert to metric if needed
+            let x1ValMetric = x1Val;
+            let x2ValMetric = x2Val;
+            if (state.unitSystem === 'english') {
+                x1ValMetric = convertValue(x1Val, x1Prop, false);
+                x2ValMetric = convertValue(x2Val, x2Prop, false);
+            }
+
+            const normalize = (str) => str.toLowerCase().replace(/[\s\(\)·]/g, '');
+            const normalizedCols = columns.map(normalize);
+            const x1PropNorm = normalize(x1Prop);
+            const x2PropNorm = normalize(x2Prop);
+            const yPropNorm = normalize(yProp);
+
+            const x1Idx = normalizedCols.indexOf(x1PropNorm);
+            const x2Idx = normalizedCols.indexOf(x2PropNorm);
+
+            if (x1Idx === -1) {
+                throw new Error(`Property not found: ${x1Prop}`);
+            }
+            if (x2Idx === -1) {
+                throw new Error(`Property not found: ${x2Prop}`);
+            }
+
+            // Find all unique values of first property (usually pressure)
+            const x1Values = [...new Set(data.map(row => row[x1Idx]))].sort((a, b) => a - b);
+
+            // Find the two pressure values that bracket our input
+            let p1Idx = 0, p2Idx = 1;
+            for (let i = 0; i < x1Values.length - 1; i++) {
+                if (x1ValMetric >= x1Values[i] && x1ValMetric <= x1Values[i + 1]) {
+                    p1Idx = i;
+                    p2Idx = i + 1;
+                    break;
+                }
+            }
+            const p1 = x1Values[p1Idx];
+            const p2 = x1Values[p2Idx];
+
+            // Get rows for each pressure
+            const rowsP1 = data.filter(row => row[x1Idx] === p1);
+            const rowsP2 = data.filter(row => row[x1Idx] === p2);
+
+            // Find temperature (x2) bracketing indices in each pressure group
+            const findBracket = (rows, val) => {
+                const x2Vals = rows.map(row => row[x2Idx]);
+                for (let i = 0; i < x2Vals.length - 1; i++) {
+                    if (val >= x2Vals[i] && val <= x2Vals[i + 1]) {
+                        return [i, i + 1];
+                    }
+                }
+                return [0, 1]; // Default if not found
+            };
+
+            const [t1_p1, t2_p1] = findBracket(rowsP1, x2ValMetric);
+            const [t1_p2, t2_p2] = findBracket(rowsP2, x2ValMetric);
+
+            // Get matching columns for yProp
+            const matchingCols = [];
+            columns.forEach((col, colIdx) => {
+                const colNorm = normalize(col);
+                if (colNorm.startsWith(yPropNorm) && colIdx !== x1Idx && colIdx !== x2Idx) {
+                    matchingCols.push({ original: col, index: colIdx });
+                }
+            });
+
+            if (matchingCols.length === 0) {
+                throw new Error(`No properties found matching: ${yProp}`);
+            }
+
+            // Perform bilinear interpolation for each matching property
+            const results = {};
+            matchingCols.forEach(({ original, index }) => {
+                // Get four corner values
+                const Q11 = rowsP1[t1_p1][index]; // P1, T1
+                const Q12 = rowsP1[t2_p1][index]; // P1, T2
+                const Q21 = rowsP2[t1_p2][index]; // P2, T1
+                const Q22 = rowsP2[t2_p2][index]; // P2, T2
+
+                const T1 = rowsP1[t1_p1][x2Idx];
+                const T2 = rowsP1[t2_p1][x2Idx];
+
+                // Bilinear interpolation
+                // First interpolate in T direction at P1
+                const R1 = Q11 + (Q12 - Q11) * (x2ValMetric - T1) / (T2 - T1);
+                // Then interpolate in T direction at P2
+                const R2 = Q21 + (Q22 - Q21) * (x2ValMetric - T1) / (T2 - T1);
+                // Finally interpolate in P direction
+                const interpolatedValue = R1 + (R2 - R1) * (x1ValMetric - p1) / (p2 - p1);
+
+                const finalValue = state.unitSystem === 'english'
+                    ? convertValue(interpolatedValue, original, true)
+                    : interpolatedValue;
+
+                results[original] = finalValue;
+            });
+
+            // Check if extrapolating
+            const x1Data = data.map(row => row[x1Idx]);
+            const x2Data = data.map(row => row[x2Idx]);
+            const minX1 = Math.min(...x1Data);
+            const maxX1 = Math.max(...x1Data);
+            const minX2 = Math.min(...x2Data);
+            const maxX2 = Math.max(...x2Data);
+            const extrapolating = x1ValMetric < minX1 || x1ValMetric > maxX1 || x2ValMetric < minX2 || x2ValMetric > maxX2;
+
+            return {
+                allValues: results,
+                extrapolating,
+                range: {
+                    min: `${x1Prop}: ${state.unitSystem === 'english' ? convertValue(minX1, x1Prop, true) : minX1}, ${x2Prop}: ${state.unitSystem === 'english' ? convertValue(minX2, x2Prop, true) : minX2}`,
+                    max: `${x1Prop}: ${state.unitSystem === 'english' ? convertValue(maxX1, x1Prop, true) : maxX1}, ${x2Prop}: ${state.unitSystem === 'english' ? convertValue(maxX2, x2Prop, true) : maxX2}`
+                }
+            };
+        }
+
+        // 1D interpolation for saturated tables
         function interpolate(tableData, xProp, xVal, yProp) {
             const { columns, data } = tableData;
 
@@ -18947,7 +19074,23 @@ const EMBEDDED_DATA = {
         function handleCalculate() {
             try {
                 const tableData = state.materialData[state.selectedMaterial][state.selectedTable];
-                const result = interpolate(tableData, state.xProperty, parseFloat(state.xValue), state.yProperty);
+                let result;
+
+                if (isSuperheatedTable(state.selectedTable)) {
+                    // Superheated table: requires two properties (pressure + another)
+                    result = interpolate2D(
+                        tableData,
+                        state.xProperty,
+                        parseFloat(state.xValue),
+                        state.x2Property,
+                        parseFloat(state.x2Value),
+                        state.yProperty
+                    );
+                } else {
+                    // Saturated table: single property lookup
+                    result = interpolate(tableData, state.xProperty, parseFloat(state.xValue), state.yProperty);
+                }
+
                 state.results = result;
                 state.screen = 'results';
                 render();
@@ -18962,6 +19105,8 @@ const EMBEDDED_DATA = {
             state.selectedTable = null;
             state.xProperty = '';
             state.xValue = '';
+            state.x2Property = '';
+            state.x2Value = '';
             state.yProperty = '';
             state.results = null;
             render();
@@ -19155,6 +19300,7 @@ const EMBEDDED_DATA = {
         function renderPropertyScreen() {
             const tableData = state.materialData[state.selectedMaterial][state.selectedTable];
             const availableProps = tableData.columns;
+            const isSuperheat = isSuperheatedTable(state.selectedTable);
             const baseProperties = [
                 { key: 'T', label: 'Temperature (T)' },
                 { key: 'P', label: 'Pressure (P, Psat)' },
@@ -19163,6 +19309,11 @@ const EMBEDDED_DATA = {
                 { key: 'h', label: 'Enthalpy (h)' },
                 { key: 's', label: 'Entropy (s)' }
             ];
+
+            // Validation for calculate button
+            const canCalculate = isSuperheat
+                ? (state.xProperty && state.xValue && state.x2Property && state.x2Value && state.yProperty)
+                : (state.xProperty && state.xValue && state.yProperty);
 
             return `
                 <div class="space-y-4">
@@ -19185,9 +19336,22 @@ const EMBEDDED_DATA = {
                     <h2 class="text-2xl font-bold text-gray-800">Property Lookup</h2>
                     <div class="text-sm text-gray-600">${state.selectedMaterial} → ${state.selectedTable}</div>
 
+                    ${isSuperheat ? `
+                        <div class="bg-yellow-50 border-2 border-yellow-400 rounded-lg p-3 flex items-start gap-2">
+                            <svg class="text-yellow-600 flex-shrink-0 mt-0.5" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="text-sm text-yellow-800">
+                                <strong>Superheated Table:</strong> Requires TWO properties (typically Pressure + Temperature) to define the state.
+                            </div>
+                        </div>
+                    ` : ''}
+
                     <div class="bg-white p-6 rounded-lg border-2 border-gray-200 space-y-4">
                         <div>
-                            <label class="block text-sm font-semibold text-gray-700 mb-2">Known Property (X):</label>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                ${isSuperheat ? 'First Known Property (Pressure):' : 'Known Property (X):'}
+                            </label>
                             <select id="xProperty" onchange="state.xProperty=this.value; render();" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
                                 <option value="">-- Select Property --</option>
                                 ${availableProps.map(prop => `
@@ -19200,13 +19364,37 @@ const EMBEDDED_DATA = {
 
                         <div>
                             <label class="block text-sm font-semibold text-gray-700 mb-2">
-                                Value of ${state.xProperty ? formatPropertyName(state.xProperty) : 'X'}:
+                                Value of ${state.xProperty ? formatPropertyName(state.xProperty) : (isSuperheat ? 'Pressure' : 'X')}:
                             </label>
                             <input type="number" step="any" id="xValue" value="${state.xValue}"
                                    oninput="state.xValue=this.value"
                                    placeholder="Enter numerical value"
                                    class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
                         </div>
+
+                        ${isSuperheat ? `
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">Second Known Property (e.g., Temperature):</label>
+                                <select id="x2Property" onchange="state.x2Property=this.value; render();" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
+                                    <option value="">-- Select Property --</option>
+                                    ${availableProps.map(prop => `
+                                        <option value="${prop}" ${state.x2Property === prop ? 'selected' : ''}>
+                                            ${formatPropertyName(prop)}
+                                        </option>
+                                    `).join('')}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                    Value of ${state.x2Property ? formatPropertyName(state.x2Property) : 'Second Property'}:
+                                </label>
+                                <input type="number" step="any" id="x2Value" value="${state.x2Value}"
+                                       oninput="state.x2Value=this.value"
+                                       placeholder="Enter numerical value"
+                                       class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
+                            </div>
+                        ` : ''}
 
                         <div>
                             <label class="block text-sm font-semibold text-gray-700 mb-2">Find Property (Y):</label>
@@ -19222,7 +19410,7 @@ const EMBEDDED_DATA = {
                         </div>
 
                         <button onclick="handleCalculate()"
-                                ${!state.xProperty || !state.xValue || !state.yProperty ? 'disabled' : ''}
+                                ${!canCalculate ? 'disabled' : ''}
                                 class="w-full p-4 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-lg transition-colors">
                             Calculate
                         </button>
@@ -19260,7 +19448,11 @@ const EMBEDDED_DATA = {
                             <div>
                                 <div class="font-semibold text-yellow-800">Extrapolation Warning</div>
                                 <div class="text-sm text-yellow-700 mt-1">
-                                    Input value (${state.xValue}) is outside table range [${state.results.range.min.toFixed(4)} - ${state.results.range.max.toFixed(4)}]
+                                    ${isSuperheatedTable(state.selectedTable) ? `
+                                        Input values are outside table range: [${state.results.range.min}] - [${state.results.range.max}]
+                                    ` : `
+                                        Input value (${state.xValue}) is outside table range [${state.results.range.min.toFixed(4)} - ${state.results.range.max.toFixed(4)}]
+                                    `}
                                 </div>
                             </div>
                         </div>
@@ -19268,9 +19460,18 @@ const EMBEDDED_DATA = {
 
                     <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
                         <div class="text-sm text-blue-700 font-semibold mb-1">Given:</div>
-                        <div class="text-lg text-blue-900">
-                            ${formatPropertyName(state.xProperty)} = ${state.xValue}
-                        </div>
+                        ${isSuperheatedTable(state.selectedTable) ? `
+                            <div class="text-lg text-blue-900">
+                                ${formatPropertyName(state.xProperty)} = ${state.xValue}
+                            </div>
+                            <div class="text-lg text-blue-900 mt-1">
+                                ${formatPropertyName(state.x2Property)} = ${state.x2Value}
+                            </div>
+                        ` : `
+                            <div class="text-lg text-blue-900">
+                                ${formatPropertyName(state.xProperty)} = ${state.xValue}
+                            </div>
+                        `}
                         <div class="text-sm text-blue-700 mt-2">Looking for: ${state.yProperty}</div>
                     </div>
 
