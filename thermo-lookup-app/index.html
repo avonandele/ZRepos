@@ -85,13 +85,13 @@
         };
 
         function getConversionType(propName) {
-            const normalized = propName.toLowerCase();
-            if (normalized.includes('temp')) return 'temperature';
-            if (normalized.includes('pressure') || normalized.startsWith('p')) return 'pressure';
-            if (normalized.startsWith('v')) return 'v';
-            if (normalized.startsWith('u')) return 'u';
-            if (normalized.startsWith('h')) return 'h';
-            if (normalized.startsWith('s')) return 's';
+            const normalized = propName.toLowerCase().replace(/[\s\(\)·]/g, '');
+            if (normalized.includes('temp') || normalized === 't°c' || normalized === 't°f' || normalized.startsWith('t')) return 'temperature';
+            if (normalized.includes('pressure') || normalized.includes('psat') || normalized.includes('pres') || normalized.startsWith('p')) return 'pressure';
+            if (normalized.startsWith('v') || normalized.includes('specificvolume')) return 'v';
+            if (normalized.startsWith('u') && !normalized.includes('ufg')) return 'u';
+            if (normalized.startsWith('h') && !normalized.includes('hfg')) return 'h';
+            if (normalized.startsWith('s') && !normalized.includes('sfg')) return 's';
             return null;
         }
 
@@ -300,6 +300,11 @@
         // RENDERING FUNCTIONS
         // ========================================================================
         function formatPropertyName(prop) {
+            // Handle format like "T (°C)" or "Psat (kPa)"
+            if (prop.includes('(') && prop.includes(')')) {
+                return prop; // Already formatted with units
+            }
+
             const match = prop.match(/^([a-z]+)(.*?)$/i);
             if (!match) return prop;
 
@@ -308,6 +313,8 @@
             const nameMap = {
                 'temperature': 'Temperature',
                 'pressure': 'Pressure',
+                'psat': 'P_sat',
+                't': 'T',
                 'vf': 'v_f', 'vg': 'v_g', 'vfg': 'v_fg',
                 'uf': 'u_f', 'ug': 'u_g', 'ufg': 'u_fg',
                 'hf': 'h_f', 'hg': 'h_g', 'hfg': 'h_fg',
@@ -457,7 +464,14 @@
         function renderPropertyScreen() {
             const tableData = state.materialData[state.selectedMaterial][state.selectedTable];
             const availableProps = tableData.columns;
-            const baseProperties = ['v', 'u', 'h', 's', 'T', 'P', 'temperature', 'pressure'];
+            const baseProperties = [
+                { key: 'T', label: 'Temperature (T)' },
+                { key: 'P', label: 'Pressure (P, Psat)' },
+                { key: 'v', label: 'Specific Volume (v)' },
+                { key: 'u', label: 'Internal Energy (u)' },
+                { key: 'h', label: 'Enthalpy (h)' },
+                { key: 's', label: 'Entropy (s)' }
+            ];
 
             return `
                 <div class="space-y-4">
@@ -487,7 +501,7 @@
                                 <option value="">-- Select Property --</option>
                                 ${availableProps.map(prop => `
                                     <option value="${prop}" ${state.xProperty === prop ? 'selected' : ''}>
-                                        ${prop} → ${getUnitLabel(prop)}
+                                        ${formatPropertyName(prop)}
                                     </option>
                                 `).join('')}
                             </select>
@@ -495,11 +509,11 @@
 
                         <div>
                             <label class="block text-sm font-semibold text-gray-700 mb-2">
-                                Value of ${state.xProperty || 'X'} ${state.xProperty ? `(${getUnitLabel(state.xProperty)})` : ''}:
+                                Value of ${state.xProperty ? formatPropertyName(state.xProperty) : 'X'}:
                             </label>
                             <input type="number" step="any" id="xValue" value="${state.xValue}"
                                    oninput="state.xValue=this.value"
-                                   placeholder="Enter value in ${getUnitLabel(state.xProperty) || 'selected units'}"
+                                   placeholder="Enter numerical value"
                                    class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
                         </div>
 
@@ -508,11 +522,11 @@
                             <select id="yProperty" onchange="state.yProperty=this.value; render();" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
                                 <option value="">-- Select Property --</option>
                                 ${baseProperties.map(prop => `
-                                    <option value="${prop}" ${state.yProperty === prop ? 'selected' : ''}>${prop}</option>
+                                    <option value="${prop.key}" ${state.yProperty === prop.key ? 'selected' : ''}>${prop.label}</option>
                                 `).join('')}
                             </select>
                             <div class="text-xs text-gray-500 mt-1">
-                                Will return all related values (e.g., "v" returns v_f, v_g, v_fg if available)
+                                Will return all related values (e.g., "v" returns vf, vg, vfg if available)
                             </div>
                         </div>
 
