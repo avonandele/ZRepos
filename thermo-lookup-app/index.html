@@ -19144,29 +19144,34 @@ const EMBEDDED_DATA = {
         // RENDERING FUNCTIONS
         // ========================================================================
         function formatPropertyName(prop) {
-            // Handle format like "T (°C)" or "Psat (kPa)"
+            // Extract the base property name (before parentheses if they exist)
+            let baseProp = prop;
             if (prop.includes('(') && prop.includes(')')) {
-                return prop; // Already formatted with units
+                baseProp = prop.substring(0, prop.indexOf('(')).trim();
             }
 
-            const match = prop.match(/^([a-z]+)(.*?)$/i);
-            if (!match) return prop;
-
-            const baseName = match[1];
-
+            // Clean up the property name for display
             const nameMap = {
                 'temperature': 'Temperature',
                 'pressure': 'Pressure',
-                'psat': 'P_sat',
-                't': 'T',
+                'psat': 'Pressure',
+                'p_sat': 'Pressure',
+                't': 'Temperature',
+                'p': 'Pressure',
                 'vf': 'v_f', 'vg': 'v_g', 'vfg': 'v_fg',
+                'v_f': 'v_f', 'v_g': 'v_g', 'v_fg': 'v_fg',
                 'uf': 'u_f', 'ug': 'u_g', 'ufg': 'u_fg',
+                'u_f': 'u_f', 'u_g': 'u_g', 'u_fg': 'u_fg',
                 'hf': 'h_f', 'hg': 'h_g', 'hfg': 'h_fg',
+                'h_f': 'h_f', 'h_g': 'h_g', 'h_fg': 'h_fg',
                 'sf': 's_f', 'sg': 's_g', 'sfg': 's_fg',
+                's_f': 's_f', 's_g': 's_g', 's_fg': 's_fg',
                 'v': 'v', 'u': 'u', 'h': 'h', 's': 's'
             };
 
-            const displayName = nameMap[baseName.toLowerCase()] || baseName;
+            const displayName = nameMap[baseProp.toLowerCase()] || baseProp;
+
+            // Get the appropriate unit for the current system
             const unit = getUnitLabel(prop);
 
             if (unit) {
@@ -19371,7 +19376,7 @@ const EMBEDDED_DATA = {
                         ${isSuperheat ? `
                             <div>
                                 <label class="block text-sm font-semibold text-gray-700 mb-2">
-                                    Pressure ${pressureCol ? formatPropertyName(pressureCol) : ''}:
+                                    ${pressureCol ? formatPropertyName(pressureCol) : 'Pressure'}:
                                 </label>
                                 <input type="number" step="any" id="pressureValue" value="${state.pressureValue}"
                                        oninput="state.pressureValue=this.value"
@@ -19428,6 +19433,15 @@ const EMBEDDED_DATA = {
         }
 
         function renderResultsScreen() {
+            const isSuperheat = isSuperheatedTable(state.selectedTable);
+            const tableData = state.materialData[state.selectedMaterial][state.selectedTable];
+
+            // Find pressure column for superheated tables
+            const pressureCol = isSuperheat ? tableData.columns.find(col =>
+                col.toLowerCase().includes('p') &&
+                (col.toLowerCase().includes('mpa') || col.toLowerCase().includes('kpa'))
+            ) : null;
+
             return `
                 <div class="space-y-4">
                     <button onclick="state.screen='properties'; render();" class="flex items-center text-blue-600 hover:text-blue-700">
@@ -19468,9 +19482,9 @@ const EMBEDDED_DATA = {
 
                     <div class="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
                         <div class="text-sm text-blue-700 font-semibold mb-1">Given:</div>
-                        ${isSuperheatedTable(state.selectedTable) ? `
+                        ${isSuperheat ? `
                             <div class="text-lg text-blue-900">
-                                Pressure = ${state.pressureValue}
+                                ${pressureCol ? formatPropertyName(pressureCol) : 'Pressure'} = ${state.pressureValue}
                             </div>
                             <div class="text-lg text-blue-900 mt-1">
                                 ${formatPropertyName(state.xProperty)} = ${state.xValue}
