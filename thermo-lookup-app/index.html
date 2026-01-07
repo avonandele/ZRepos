@@ -19274,7 +19274,7 @@ const EMBEDDED_DATA = {
                     <div class="grid grid-cols-1 gap-3">
                         ${materials.map((material, idx) => `
                             <button onclick="state.selectedMaterial='${material}'; state.screen='table'; render();" class="p-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-left transition-colors flex items-center justify-between">
-                                <span class="font-semibold">${idx + 1}. ${material}</span>
+                                <span class="font-semibold">${material}</span>
                                 <span class="text-sm opacity-75">${Object.keys(state.materialData[material]).length} tables</span>
                             </button>
                         `).join('')}
@@ -19299,7 +19299,7 @@ const EMBEDDED_DATA = {
                     <div class="grid grid-cols-1 gap-3">
                         ${tables.map((table, idx) => `
                             <button onclick="state.selectedTable='${table}'; state.screen='properties'; render();" class="p-4 bg-green-500 hover:bg-green-600 text-white rounded-lg text-left transition-colors">
-                                <div class="font-semibold">${idx + 1}. ${table}</div>
+                                <div class="font-semibold">${table.replace('.csv', '')}</div>
                                 <div class="text-sm opacity-75 mt-1">
                                     ${state.materialData[state.selectedMaterial][table].columns.length} properties available
                                 </div>
