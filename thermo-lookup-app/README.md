@@ -2,14 +2,18 @@
 
 A fast, interactive web application for looking up thermodynamic properties with automatic interpolation and unit conversion support.
 
+**✨ NEW: All data is now embedded! Just download and open `index.html` - no setup required!**
+
 ## Features
 
-- **Multi-material support**: Water, R-134a, Ideal Gases, and more
+- **Self-contained**: All 18 thermodynamic tables embedded directly in the HTML file
+- **Zero setup**: Download and double-click to run - no installation, no uploads, no server needed
+- **Multi-material support**: Water, R-134a, Ideal Gases pre-loaded
 - **Automatic interpolation**: Linear interpolation between table values
 - **Dual unit systems**: Metric (SI) and English (IP) units with automatic conversion
 - **Extrapolation warnings**: Alerts when input values are outside table ranges
 - **Beautiful UI**: Modern, responsive design with Tailwind CSS
-- **Client-side only**: No backend required, runs entirely in the browser
+- **Works offline**: Runs entirely in the browser with no internet required
 
 ## Project Structure
 
@@ -23,102 +27,68 @@ thermo-lookup-app/
 └── README.md           # This file
 ```
 
-## Setup Instructions
+## Quick Start (No Setup Required!)
 
-### 1. Add Your CSV Files
+### Step 1: Download
+Download `index.html` from this repository (or clone the repo)
 
-Place your CSV files in the `Tables/` directory organized by material:
+### Step 2: Open
+Double-click `index.html` to open it in your web browser
 
-```
-Tables/
-├── Water/
-│   ├── saturated_water_T.csv
-│   ├── saturated_water_P.csv
-│   ├── superheated_water.csv
-│   └── compressed_water.csv
-├── R-134a/
-│   ├── saturated_r134a_T.csv
-│   └── saturated_r134a_P.csv
-└── Ideal Gases/
-    ├── air.csv
-    ├── nitrogen.csv
-    └── oxygen.csv
-```
+### Step 3: Use
+1. Select your material (Water, R-134a, or Ideal Gases)
+2. Choose a property table
+3. Enter your known property value
+4. Get interpolated results instantly!
 
-**CSV Format Requirements:**
-- First row must contain column headers
-- Use lowercase property names with units (e.g., `temperature°c`, `pressurempa`)
-- Numeric data should be properly formatted
-- Example format:
+**That's it!** All thermodynamic data is embedded - no uploads, no server, no configuration needed.
 
-```csv
-temperature°c,pressurempa,vfm3/kg,vgm3/kg,ufkj/kg,ugkj/kg,hfkj/kg,hgkj/kg,sfkj/kg·k,sgkj/kg·k
-0.01,0.0006117,0.001000,206.00,0.00,2374.9,0.01,2500.9,0.0000,9.1555
-20,0.0023392,0.001002,57.762,83.91,2402.3,83.91,2537.4,0.2965,8.6661
-40,0.0073849,0.001008,19.515,167.53,2429.0,167.53,2573.5,0.5724,8.2558
-```
+## Pre-loaded Data
 
-### 2. Start a Local Server
+The app includes 18 complete thermodynamic property tables:
 
-The app requires a local web server to work properly (due to browser security restrictions with file uploads).
+**Water (5 tables):**
+- A-4 T Saturated Water
+- A-5 P Saturated Water
+- A-6 Superheated Water
+- A-7 Compressed Water
+- A-8 Saturated Ice-Water Vapor
 
-**Option A: Using Python 3**
-```bash
-cd thermo-lookup-app
-python3 -m http.server 8000
-```
+**R-134a (3 tables):**
+- A-11 T Saturated R-134a
+- A-12 P Saturated R-134a
+- A-13 Superheated R-134a
 
-**Option B: Using Python 2**
-```bash
-cd thermo-lookup-app
-python -m SimpleHTTPServer 8000
-```
-
-**Option C: Using Node.js (npx)**
-```bash
-cd thermo-lookup-app
-npx http-server -p 8000
-```
-
-**Option D: Using PHP**
-```bash
-cd thermo-lookup-app
-php -S localhost:8000
-```
-
-### 3. Open in Browser
-
-Navigate to:
-```
-http://localhost:8000
-```
+**Ideal Gases (10 tables):**
+- Air, Nitrogen, Oxygen, Carbon Dioxide, Carbon Monoxide
+- Hydrogen, Water Vapor, Monoatomic Oxygen, Hydroxyl
+- Atmosphere at High Altitude
 
 ## How to Use
 
-1. **Upload Tables**
-   - Click "Upload Folder" to select your entire `Tables/` directory
-   - Or click "Upload Individual Files" to select specific CSV files
-   - Try "Demo Mode" to test with sample water data
+The app opens ready to use with all data pre-loaded!
 
-2. **Select Unit System**
+1. **Select Unit System**
    - Choose between Metric (SI) or English (IP) units
    - All inputs and outputs will use the selected system
 
-3. **Select Material**
-   - Choose from available materials (Water, R-134a, etc.)
+2. **Select Material**
+   - Choose from Water, R-134a, or Ideal Gases
 
-4. **Select Table**
+3. **Select Table**
    - Choose the specific property table (e.g., saturated by temperature, saturated by pressure)
 
-5. **Perform Lookup**
+4. **Perform Lookup**
    - Select your known property (X) from the dropdown
    - Enter its value
    - Select the property you want to find (Y)
    - Click "Calculate"
 
-6. **View Results**
+5. **View Results**
    - See all related properties (e.g., selecting "h" returns h_f, h_g, h_fg)
    - Check for extrapolation warnings if your value is outside the table range
+
+**Optional:** Upload custom CSV files using the "Upload Different Files" link if you need additional tables
 
 ## Unit Conversions
 
@@ -158,21 +128,26 @@ Where:
 
 ## Troubleshooting
 
-**Files not loading:**
-- Make sure you're using a local web server (not opening index.html directly)
-- Check that CSV files are properly formatted with headers
+**App not opening:**
+- Make sure you're opening `index.html` in a modern web browser (Chrome, Firefox, Safari, Edge)
+- File size is ~325KB - download may take a moment
+
+**Data not showing:**
+- All data is embedded - no uploads needed
+- If you see "Upload" screen, click "Try Demo Mode" or refresh the page
+- Clear browser cache if you have an old version
 
 **Properties not found:**
-- Verify column names in CSV match expected patterns
-- Check for typos or special characters
+- Make sure you select a property that exists in your chosen table
+- Check table column headers to see available properties
 
 **Interpolation errors:**
-- Ensure table data is sorted by the independent variable
-- Verify numeric values are valid (no text in data rows)
+- Verify your input value is within the table range (or close to it)
+- Extrapolation warnings are normal for values outside the table
 
-**Demo mode not working:**
-- Clear browser cache and reload
-- Check browser console for JavaScript errors
+**Wrong results:**
+- Double-check you're using the correct unit system (Metric vs English)
+- Verify you selected the correct table and material
 
 ## Technologies Used
 
