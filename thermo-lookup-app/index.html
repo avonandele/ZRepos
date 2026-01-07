@@ -19235,6 +19235,23 @@ const EMBEDDED_DATA = {
 
         function renderMaterialScreen() {
             const materials = Object.keys(state.materialData);
+
+            // Sort materials in booklet order: Water, R-134a, Ideal Gases
+            const materialOrder = ['Water', 'R-134a', 'Ideal Gases'];
+            materials.sort((a, b) => {
+                const indexA = materialOrder.indexOf(a);
+                const indexB = materialOrder.indexOf(b);
+                // If both materials are in the order array, sort by their position
+                if (indexA !== -1 && indexB !== -1) {
+                    return indexA - indexB;
+                }
+                // If only one is in the order array, prioritize it
+                if (indexA !== -1) return -1;
+                if (indexB !== -1) return 1;
+                // Otherwise, sort alphabetically
+                return a.localeCompare(b);
+            });
+
             return `
                 <div class="space-y-4">
                     <div class="flex justify-between items-center">
