@@ -18725,10 +18725,9 @@ const EMBEDDED_DATA = {
             materialData: EMBEDDED_DATA,
             selectedMaterial: null,
             selectedTable: null,
+            pressureValue: '',  // Pressure for superheated tables (always required first)
             xProperty: '',
             xValue: '',
-            x2Property: '',  // Second known property for superheated tables
-            x2Value: '',     // Second value for superheated tables
             yProperty: '',
             results: null,
             uploadStatus: '',
@@ -19077,13 +19076,23 @@ const EMBEDDED_DATA = {
                 let result;
 
                 if (isSuperheatedTable(state.selectedTable)) {
-                    // Superheated table: requires two properties (pressure + another)
+                    // Superheated table: requires pressure + another property
+                    // Find the pressure column name
+                    const pressureCol = tableData.columns.find(col =>
+                        col.toLowerCase().includes('p') &&
+                        (col.toLowerCase().includes('mpa') || col.toLowerCase().includes('kpa'))
+                    );
+
+                    if (!pressureCol) {
+                        throw new Error('Pressure column not found in superheated table');
+                    }
+
                     result = interpolate2D(
                         tableData,
+                        pressureCol,
+                        parseFloat(state.pressureValue),
                         state.xProperty,
                         parseFloat(state.xValue),
-                        state.x2Property,
-                        parseFloat(state.x2Value),
                         state.yProperty
                     );
                 } else {
@@ -19103,10 +19112,9 @@ const EMBEDDED_DATA = {
             state.screen = 'material';
             state.selectedMaterial = null;
             state.selectedTable = null;
+            state.pressureValue = '';
             state.xProperty = '';
             state.xValue = '';
-            state.x2Property = '';
-            state.x2Value = '';
             state.yProperty = '';
             state.results = null;
             render();
@@ -19301,6 +19309,18 @@ const EMBEDDED_DATA = {
             const tableData = state.materialData[state.selectedMaterial][state.selectedTable];
             const availableProps = tableData.columns;
             const isSuperheat = isSuperheatedTable(state.selectedTable);
+
+            // Find pressure column for superheated tables
+            const pressureCol = isSuperheat ? tableData.columns.find(col =>
+                col.toLowerCase().includes('p') &&
+                (col.toLowerCase().includes('mpa') || col.toLowerCase().includes('kpa'))
+            ) : null;
+
+            // Filter out pressure column for X property dropdown in superheated tables
+            const selectableProps = isSuperheat
+                ? availableProps.filter(prop => prop !== pressureCol)
+                : availableProps;
+
             const baseProperties = [
                 { key: 'T', label: 'Temperature (T)' },
                 { key: 'P', label: 'Pressure (P, Psat)' },
@@ -19312,7 +19332,7 @@ const EMBEDDED_DATA = {
 
             // Validation for calculate button
             const canCalculate = isSuperheat
-                ? (state.xProperty && state.xValue && state.x2Property && state.x2Value && state.yProperty)
+                ? (state.pressureValue && state.xProperty && state.xValue && state.yProperty)
                 : (state.xProperty && state.xValue && state.yProperty);
 
             return `
@@ -19342,19 +19362,31 @@ const EMBEDDED_DATA = {
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                             </svg>
                             <div class="text-sm text-yellow-800">
-                                <strong>Superheated Table:</strong> Requires TWO properties (typically Pressure + Temperature) to define the state.
+                                <strong>Superheated Table:</strong> Requires Pressure AND one other property (typically Temperature) to define the state.
                             </div>
                         </div>
                     ` : ''}
 
                     <div class="bg-white p-6 rounded-lg border-2 border-gray-200 space-y-4">
+                        ${isSuperheat ? `
+                            <div>
+                                <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                    Pressure ${pressureCol ? formatPropertyName(pressureCol) : ''}:
+                                </label>
+                                <input type="number" step="any" id="pressureValue" value="${state.pressureValue}"
+                                       oninput="state.pressureValue=this.value"
+                                       placeholder="Enter pressure value"
+                                       class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
+                            </div>
+                        ` : ''}
+
                         <div>
                             <label class="block text-sm font-semibold text-gray-700 mb-2">
-                                ${isSuperheat ? 'First Known Property (Pressure):' : 'Known Property (X):'}
+                                ${isSuperheat ? 'Known Property (X) - typically Temperature:' : 'Known Property (X):'}
                             </label>
                             <select id="xProperty" onchange="state.xProperty=this.value; render();" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
                                 <option value="">-- Select Property --</option>
-                                ${availableProps.map(prop => `
+                                ${selectableProps.map(prop => `
                                     <option value="${prop}" ${state.xProperty === prop ? 'selected' : ''}>
                                         ${formatPropertyName(prop)}
                                     </option>
@@ -19364,37 +19396,13 @@ const EMBEDDED_DATA = {
 
                         <div>
                             <label class="block text-sm font-semibold text-gray-700 mb-2">
-                                Value of ${state.xProperty ? formatPropertyName(state.xProperty) : (isSuperheat ? 'Pressure' : 'X')}:
+                                Value of ${state.xProperty ? formatPropertyName(state.xProperty) : 'X'}:
                             </label>
                             <input type="number" step="any" id="xValue" value="${state.xValue}"
                                    oninput="state.xValue=this.value"
                                    placeholder="Enter numerical value"
                                    class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
                         </div>
-
-                        ${isSuperheat ? `
-                            <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">Second Known Property (e.g., Temperature):</label>
-                                <select id="x2Property" onchange="state.x2Property=this.value; render();" class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
-                                    <option value="">-- Select Property --</option>
-                                    ${availableProps.map(prop => `
-                                        <option value="${prop}" ${state.x2Property === prop ? 'selected' : ''}>
-                                            ${formatPropertyName(prop)}
-                                        </option>
-                                    `).join('')}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label class="block text-sm font-semibold text-gray-700 mb-2">
-                                    Value of ${state.x2Property ? formatPropertyName(state.x2Property) : 'Second Property'}:
-                                </label>
-                                <input type="number" step="any" id="x2Value" value="${state.x2Value}"
-                                       oninput="state.x2Value=this.value"
-                                       placeholder="Enter numerical value"
-                                       class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none">
-                            </div>
-                        ` : ''}
 
                         <div>
                             <label class="block text-sm font-semibold text-gray-700 mb-2">Find Property (Y):</label>
@@ -19405,7 +19413,7 @@ const EMBEDDED_DATA = {
                                 `).join('')}
                             </select>
                             <div class="text-xs text-gray-500 mt-1">
-                                Will return all related values (e.g., "v" returns vf, vg, vfg if available)
+                                Will return all related values (e.g., "v" returns all specific volume properties if available)
                             </div>
                         </div>
 
@@ -19462,10 +19470,10 @@ const EMBEDDED_DATA = {
                         <div class="text-sm text-blue-700 font-semibold mb-1">Given:</div>
                         ${isSuperheatedTable(state.selectedTable) ? `
                             <div class="text-lg text-blue-900">
-                                ${formatPropertyName(state.xProperty)} = ${state.xValue}
+                                Pressure = ${state.pressureValue}
                             </div>
                             <div class="text-lg text-blue-900 mt-1">
-                                ${formatPropertyName(state.x2Property)} = ${state.x2Value}
+                                ${formatPropertyName(state.xProperty)} = ${state.xValue}
                             </div>
                         ` : `
                             <div class="text-lg text-blue-900">
